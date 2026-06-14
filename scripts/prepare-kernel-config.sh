@@ -22,6 +22,10 @@ apply_policy_config() {
 
   scripts/config --enable NET_SCH_DEFAULT
   scripts/config --enable NET_SCH_FQ
+  scripts/config --module NET_SCH_FQ_CODEL
+  scripts/config --module NET_SCH_PIE
+  scripts/config --module NET_SCH_FQ_PIE
+  scripts/config --module NET_SCH_CAKE
   scripts/config --disable DEFAULT_FQ_CODEL
   scripts/config --disable DEFAULT_PFIFO_FAST
   scripts/config --enable DEFAULT_FQ
@@ -89,6 +93,10 @@ validate_config() {
   require_config_line 'CONFIG_DEFAULT_BBR=y' 'CONFIG_DEFAULT_BBR is not enabled.'
   require_config_line 'CONFIG_DEFAULT_TCP_CONG="bbr"' 'CONFIG_DEFAULT_TCP_CONG is not bbr.'
   require_config_line 'CONFIG_NET_SCH_FQ=y' 'CONFIG_NET_SCH_FQ is not built in.'
+  require_config_line 'CONFIG_NET_SCH_FQ_CODEL=m' 'CONFIG_NET_SCH_FQ_CODEL is not module-enabled.'
+  require_config_line 'CONFIG_NET_SCH_PIE=m' 'CONFIG_NET_SCH_PIE is not module-enabled.'
+  require_config_line 'CONFIG_NET_SCH_FQ_PIE=m' 'CONFIG_NET_SCH_FQ_PIE is not module-enabled.'
+  require_config_line 'CONFIG_NET_SCH_CAKE=m' 'CONFIG_NET_SCH_CAKE is not module-enabled.'
   require_config_line 'CONFIG_NET_SCH_DEFAULT=y' 'CONFIG_NET_SCH_DEFAULT is not enabled.'
   require_config_line 'CONFIG_DEFAULT_FQ=y' 'CONFIG_DEFAULT_FQ is not enabled.'
   require_config_line 'CONFIG_DEFAULT_NET_SCH="fq"' 'CONFIG_DEFAULT_NET_SCH is not fq.'
@@ -98,7 +106,7 @@ validate_config() {
   require_config_line 'CONFIG_IP_NF_FILTER=m' 'CONFIG_IP_NF_FILTER is not module-enabled.'
   require_config_line 'CONFIG_IP_NF_TARGET_MASQUERADE=m' 'CONFIG_IP_NF_TARGET_MASQUERADE is not module-enabled.'
 
-  grep -E 'CONFIG_(DEBUG_INFO_NONE|TCP_CONG_BBR|DEFAULT_BBR|DEFAULT_TCP_CONG|NET_SCH_DEFAULT|NET_SCH_FQ|DEFAULT_FQ|DEFAULT_NET_SCH|NETFILTER_XTABLES_LEGACY|IP_NF_IPTABLES_LEGACY|IP_NF_NAT|IP_NF_FILTER|IP_NF_TARGET_MASQUERADE|IP6_NF_IPTABLES_LEGACY|IP6_NF_NAT|IP6_NF_FILTER)=' .config
+  grep -E 'CONFIG_(DEBUG_INFO_NONE|TCP_CONG_BBR|DEFAULT_BBR|DEFAULT_TCP_CONG|NET_SCH_DEFAULT|NET_SCH_FQ|NET_SCH_FQ_CODEL|NET_SCH_PIE|NET_SCH_FQ_PIE|NET_SCH_CAKE|DEFAULT_FQ|DEFAULT_NET_SCH|NETFILTER_XTABLES_LEGACY|IP_NF_IPTABLES_LEGACY|IP_NF_NAT|IP_NF_FILTER|IP_NF_TARGET_MASQUERADE|IP6_NF_IPTABLES_LEGACY|IP6_NF_NAT|IP6_NF_FILTER)=' .config
 }
 
 case "$arch" in

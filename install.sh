@@ -509,28 +509,123 @@ clear_network_optimizations() {
 load_qdisc_module() {
     local qdisc_name="$1"
     local module_name="sch_$qdisc_name"
-    
-    # 检查队列算法是否已可用（通过尝试读取当前可用的 qdisc）
-    # 如果 sysctl 能成功设置，说明模块已存在
+    local previous_qdisc
+    local applied_qdisc
+
+    previous_qdisc=$(sysctl -n net.core.default_qdisc 2>/dev/null || true)
+
+    if ! lsmod | grep -q "^${module_name//-/_}"; then
+        sudo modprobe "$module_name" 2>/dev/null || true
+    fi
+
     if sudo sysctl -w net.core.default_qdisc="$qdisc_name" > /dev/null 2>&1; then
-        # 恢复原设置
-        sudo sysctl -w net.core.default_qdisc="$CURRENT_QDISC" > /dev/null 2>&1
-        return 0
+        applied_qdisc=$(sysctl -n net.core.default_qdisc 2>/dev/null || true)
+        if [[ -n "$previous_qdisc" ]]; then
+            sudo sysctl -w net.core.default_qdisc="$previous_qdisc" > /dev/null 2>&1 || true
+        fi
+        if [[ "$applied_qdisc" == "$qdisc_name" ]]; then
+            return 0
+        fi
     fi
-    
-    # 检查模块是否已加载
-    if lsmod | grep -q "^${module_name//-/_}"; then
-        return 0
-    fi
-    
-    # 模块不存在，尝试加载
+
     echo -e "\033[36m正在加载内核模块 $module_name...\033[0m"
     if sudo modprobe "$module_name" 2>/dev/null; then
-        echo -e "\033[1;32m✔ 模块 $module_name 加载成功\033[0m"
+        if sudo sysctl -w net.core.default_qdisc="$qdisc_name" > /dev/null 2>&1; then
+            applied_qdisc=$(sysctl -n net.core.default_qdisc 2>/dev/null || true)
+            if [[ -n "$previous_qdisc" ]]; then
+                sudo sysctl -w net.core.default_qdisc="$previous_qdisc" > /dev/null 2>&1 || true
+            fi
+            if [[ "$applied_qdisc" == "$qdisc_name" ]]; then
+                echo -e "\033[1;32m✔ 队列算法 $qdisc_name 可用\033[0m"
+                return 0
+            fi
+        fi
+    fi
+
+    echo -e "\033[33m⚠ 队列算法 $qdisc_name 不可用，可能当前内核缺少 $module_name\033[0m"
+    return 1
+}
+
+# 函数：确保可以操作当前网卡队列
+ensure_iproute2_tools() {
+    if command -v ip > /dev/null 2>&1 && command -v tc > /dev/null 2>&1; then
         return 0
+    fi
+
+    echo -e "\033[36m正在安装 iproute2，用于立即切换当前网卡队列算法...\033[0m"
+    sudo apt-get update > /dev/null 2>&1 || true
+    if sudo apt-get install -y iproute2 > /dev/null 2>&1; then
+        return 0
+    fi
+
+    echo -e "\033[33m⚠ iproute2 安装失败，当前网卡队列无法立即替换；仍会写入 default_qdisc。\033[0m"
+    return 1
+}
+
+# 函数：获取默认路由出口网卡
+get_default_route_interfaces() {
+    {
+        ip -o route show default 2>/dev/null || true
+        ip -o -6 route show default 2>/dev/null || true
+    } | awk '{for (i = 1; i <= NF; i++) if ($i == "dev") print $(i + 1)}' | sort -u
+}
+
+# 函数：让当前默认出口网卡立即切换队列算法
+apply_qdisc_to_active_interfaces() {
+    local qdisc_name="$1"
+    local interfaces=()
+    local iface
+    local applied=0
+    local failed=0
+
+    if ! ensure_iproute2_tools; then
+        return 0
+    fi
+
+    while IFS= read -r iface; do
+        [[ -n "$iface" ]] && interfaces+=("$iface")
+    done < <(get_default_route_interfaces)
+
+    if [[ ${#interfaces[@]} -eq 0 ]]; then
+        echo -e "\033[33m⚠ 未找到默认路由出口网卡，已仅设置 default_qdisc。\033[0m"
+        return 0
+    fi
+
+    for iface in "${interfaces[@]}"; do
+        if sudo tc qdisc replace dev "$iface" root "$qdisc_name" 2>/dev/null; then
+            echo -e "\033[1;32m✔ 当前网卡 $iface 已切换为 $qdisc_name\033[0m"
+            applied=1
+        else
+            echo -e "\033[33m⚠ 当前网卡 $iface 切换 $qdisc_name 失败\033[0m"
+            failed=1
+        fi
+    done
+
+    if [[ "$applied" -eq 1 ]]; then
+        return 0
+    fi
+
+    [[ "$failed" -eq 1 ]] && return 1
+    return 0
+}
+
+# 函数：根据队列算法是否为模块，决定是否写入开机加载
+persist_qdisc_module() {
+    local qdisc_name="$1"
+    local module_name="sch_$qdisc_name"
+
+    if [[ "$qdisc_name" == "fq" ]]; then
+        sudo rm -f "$MODULES_CONF"
+        echo -e "\033[1;32m(☆^ー^☆) 更改已永久保存啦~\033[0m"
+        return 0
+    fi
+
+    if modinfo "$module_name" > /dev/null 2>&1 || lsmod | grep -q "^${module_name//-/_}"; then
+        echo "$module_name" | sudo tee "$MODULES_CONF" > /dev/null
+        echo -e "\033[1;32m(☆^ー^☆) 更改已永久保存，模块 $module_name 将在开机时自动加载~\033[0m"
     else
-        echo -e "\033[33m⚠ 模块 $module_name 加载失败，可能内核不支持\033[0m"
-        return 1
+        sudo rm -f "$MODULES_CONF"
+        echo -e "\033[1;32m(☆^ー^☆) 更改已永久保存；$qdisc_name 可能为内置队列，无需写入模块加载配置~\033[0m"
     fi
 }
 
@@ -619,6 +714,7 @@ ask_to_save() {
     echo -e "\033[36m正在应用配置...\033[0m"
     sudo sysctl -w net.core.default_qdisc="$QDISC" > /dev/null 2>&1
     sudo sysctl -w net.ipv4.tcp_congestion_control="$ALGO" > /dev/null 2>&1
+    apply_qdisc_to_active_interfaces "$QDISC" || return 1
     
     # 验证是否生效
     NEW_QDISC=$(sysctl -n net.core.default_qdisc 2>/dev/null)
@@ -643,16 +739,8 @@ ask_to_save() {
         echo "net.core.default_qdisc=$QDISC" | sudo tee -a "$SYSCTL_CONF" > /dev/null
         echo "net.ipv4.tcp_congestion_control=$ALGO" | sudo tee -a "$SYSCTL_CONF" > /dev/null
         sudo sysctl --system > /dev/null 2>&1
-        
-        # 配置模块开机自动加载（fq 和 fq_codel 是内置的不需要）
-        if [[ "$QDISC" == "fq" || "$QDISC" == "fq_codel" ]]; then
-            # fq 和 fq_codel 是内核内置的，删除旧的模块配置文件
-            sudo rm -f "$MODULES_CONF"
-            echo -e "\033[1;32m(☆^ー^☆) 更改已永久保存啦~\033[0m"
-        else
-            echo "sch_$QDISC" | sudo tee "$MODULES_CONF" > /dev/null
-            echo -e "\033[1;32m(☆^ー^☆) 更改已永久保存，模块 sch_$QDISC 将在开机时自动加载~\033[0m"
-        fi
+
+        persist_qdisc_module "$QDISC"
     else
         echo -e "\033[33m(⌒_⌒;) 好吧，没有永久保存，重启后会恢复原设置呢~\033[0m"
     fi

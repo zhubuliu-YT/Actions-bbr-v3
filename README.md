@@ -159,6 +159,8 @@ modinfo tcp_bbr 2>/dev/null | grep '^version:'
 /etc/sysctl.d/99-joeyblog.conf
 ```
 
+脚本不仅会写入 `net.core.default_qdisc`，还会尝试把当前默认路由出口网卡的 root qdisc 立即替换为所选算法，避免只对新建队列生效、当前网卡实际仍保持旧队列。
+
 对于需要模块加载的队列算法，脚本会尝试加载对应 `sch_*` 模块，并在需要时写入：
 
 ```text
