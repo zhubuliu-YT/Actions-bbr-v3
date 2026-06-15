@@ -859,23 +859,45 @@ update_bootloader() {
     fi
 }
 
-# 函数：检测上次 apt/dpkg 是否留下 GRUB 半配置状态
-assert_no_broken_grub_packages() {
-    local broken_grub_packages=""
-
-    broken_grub_packages=$(dpkg-query -W -f='${binary:Package} ${db:Status-Abbrev}\n' \
+# 函数：查询上次 apt/dpkg 是否留下 GRUB 半配置状态
+get_broken_grub_packages() {
+    dpkg-query -W -f='${binary:Package} ${db:Status-Abbrev}\n' \
         grub-common grub2-common grub-pc grub-pc-bin \
         grub-efi-amd64 grub-efi-amd64-bin grub-efi-arm64 grub-efi-arm64-bin \
         shim-signed 2>/dev/null \
-        | awk '$1 != "" && $2 !~ /^ii/ {print $1}' \
-        | tr '\n' ' ')
+        | awk '$1 != "" && $2 ~ /^i/ && $2 !~ /^ii/ {print $1}' \
+        | tr '\n' ' '
+}
+
+# 函数：自动修复 GRUB 半配置状态，避免阻断内核安装
+repair_broken_grub_packages() {
+    local broken_grub_packages=""
+
+    broken_grub_packages=$(get_broken_grub_packages)
 
     if [[ -n "$broken_grub_packages" ]]; then
         echo -e "\033[31m检测到 GRUB 相关软件包处于未完成配置状态：$broken_grub_packages\033[0m"
-        echo -e "\033[33m这通常是之前 grub-install 设备选择失败留下的 dpkg 状态。请先手动修复：\033[0m"
+        echo -e "\033[33m正在尝试自动修复 dpkg 状态：跳过 grub-install 目标盘选择，仅完成软件包配置。\033[0m"
+
+        if command -v debconf-set-selections > /dev/null 2>&1; then
+            {
+                echo 'grub-pc grub-pc/install_devices multiselect'
+                echo 'grub-pc grub-pc/install_devices_empty boolean true'
+            } | sudo debconf-set-selections || true
+        fi
+
+        if sudo env DEBIAN_FRONTEND=noninteractive dpkg --configure -a; then
+            broken_grub_packages=$(get_broken_grub_packages)
+            if [[ -z "$broken_grub_packages" ]]; then
+                echo -e "\033[1;32m✔ GRUB 相关 dpkg 半配置状态已自动修复\033[0m"
+                return 0
+            fi
+        fi
+
+        echo -e "\033[31mGRUB 相关软件包自动修复失败：$broken_grub_packages\033[0m"
+        echo -e "\033[33m请手动执行以下命令修复后，再重新运行本脚本：\033[0m"
         echo -e "\033[33m  sudo DEBIAN_FRONTEND=dialog dpkg --configure grub-pc\033[0m"
         echo -e "\033[33m  sudo dpkg --configure -a\033[0m"
-        echo -e "\033[33m修复完成后再重新运行本脚本。\033[0m"
         return 1
     fi
 }
@@ -900,7 +922,7 @@ refresh_kernel_install_userspace() {
     echo -e "\033[36m安装内核前刷新关键用户态组件...\033[0m"
     echo -e "\033[33m将更新 apt 索引，并刷新已安装的 dpkg/initramfs/kmod/systemd/udev 等组件；不会自动升级 grub 安装器包，避免触发 grub-install 设备配置。\033[0m"
 
-    assert_no_broken_grub_packages || return 1
+    repair_broken_grub_packages || return 1
 
     if ! sudo apt-get update; then
         echo -e "\033[31mapt 索引更新失败。为避免安装后无法生成 initramfs 或更新引导，已中止内核安装。\033[0m"
