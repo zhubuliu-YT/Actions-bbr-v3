@@ -44,7 +44,7 @@ MODULES_CONF="/etc/modules-load.d/joeyblog-qdisc.conf"
 SECURITY_MODPROBE_CONF="/etc/modprobe.d/99-joeyblog-security.conf"
 # 脚本远程入口和本地快捷命令
 INSTALL_SCRIPT_URL="https://raw.githubusercontent.com/byJoey/Actions-bbr-v3/main/install.sh"
-QUICK_COMMAND_PATH="/usr/local/bin/bbrv3"
+QUICK_COMMAND_PATH="/usr/local/bin/b"
 # 可选：提升 GitHub API 限额（支持 GITHUB_TOKEN / GH_TOKEN）
 GITHUB_API_TOKEN="${GITHUB_TOKEN:-${GH_TOKEN:-}}"
 SPEEDTEST_BIN="speedtest"
@@ -95,7 +95,7 @@ EOF
     then
         sudo chmod 755 "$QUICK_COMMAND_PATH"
     else
-        echo -e "\033[33m提示：快捷命令 bbrv3 安装失败，不影响当前脚本运行。\033[0m"
+        echo -e "\033[33m提示：快捷命令 b 安装失败，不影响当前脚本运行。\033[0m"
     fi
 }
 
